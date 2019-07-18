@@ -1,9 +1,10 @@
 # Water-Rocket
 In this project Adafruit Feather M0, a vibration sensor, a barometric altimeter and a 3-axis accelerometer are used in order to receive data from the flight of a water rocket. Detailed information regarding the sensors and the microcontroller is given below:
 
-Adafruit Feather M0:               https://uk.rs-online.com/web/p/products/1245517/
+Adafruit Feather M0:               
+https://uk.rs-online.com/web/p/products/1245517/
 
-Adafruit 3-Axis accelerometer:
+Adafruit 3-Axis accelerometer:  
 https://uk.rs-online.com/web/p/products/9054665/
 
 Barometric Alitmeter:
