@@ -13,10 +13,6 @@ https://uk.rs-online.com/web/p/products/7813030/
 Vibraton Sensor:  
 https://uk.rs-online.com/web/p/products/1743259/
 
-The aim of this project is to measure the instantaneous values for altitude, acceleration in 3-dimension and 1-dimension, temperature, pressure and vibration as the water rocket completes its flight. Additionally, these values are saved to the SD card on Feather M0 and displayed on a spreadsheet.
+The aim of this project is to measure the instantaneous values for altitude, acceleration in 3-dimension and 1-dimension, temperature, pressure and vibration as the water rocket completes its flight. Additionally, these values are saved to SD card on Feather M0 and displayed on a spreadsheet.
 
-*what to include
-libraries
-definitions
-links to adafruit example code
-say that additional information is in comments section
+All the detailed information regarding code is explained with comments on the code.
