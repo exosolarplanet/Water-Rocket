@@ -1,133 +1,202 @@
-#include <Wire.h>       //accelerometer
-#include <SD.h> 
+#include <math.h>  //Library required for various mathematical functions
+#include <SPI.h>  //SPI library to communicate with the sensors
+#include <SD.h>  //SD library to communicate with the SD Card
 
-const int chipSelect = 10;  //accelerometer
-float sine_angle_z;
-float angle_z_degrees;
+#include <MS5xxx.h> //Library used for the altimeter
 
-int sensorPin = 0;    //analog pin (check it), for the temperature sensor
+#include <Wire.h> //Library used for allowing I2C communication
 
-int vib_pin = 7; // to be checked, vibration pin
+#include <Adafruit_MMA8451.h>//Library used for the accelerometer 
+#include <Adafruit_Sensor.h> //Library used for the accelerometer
 
-#define ACC (0xA7>>1)         //for acclerometer
-#define A_TO_READ (6) 
+#define cardSelect 4      //SD card chip select for feather SD Card
+#define ADC_ref 2.56      //ADC reference voltage
+#define zero_x 1.569      //0g voltage for x axis 
+#define zero_y 1.569      //0g voltage for y axis
+#define zero_z 1.569      //0g voltage for z axis
+#define sensitivity_x 0.3 //Sensitivity of x for further calculations
+#define sensitivity_y 0.3 //Sensitivity of y for further calculations
+#define sensitivity_z 0.3 //Sensitivity of z for further calculations
 
-void initAcc() {
-  writeTo(ACC, 0x2D, 1<<3);
-  writeTo(ACC, 0x31, 0x0B);
-  writeTo(ACC, 0x2C, 0x09);
-}
-void getAccelerometerData(int * result) {
-  int regAddress = 0x32; 
-  byte buff[A_TO_READ];
-  readFrom(ACC, regAddress, A_TO_READ, buff); 
-  
-  result[0] = (((int)buff[1]) << 8) | buff[0];
-  result[1] = (((int)buff[3])<< 8) | buff[2];   
-  result[2] = (((int)buff[5]) << 8) | buff[4]; 
-}
+float p_sealevel = 1013.25; //Sea-level pressure in hPa                   
+int   vib_pin = A0;         //Pin used for the vibration sensor
 
-void writeTo(int DEVICE, byte address, byte val) {
-  Wire.beginTransmission(DEVICE); //start transmission to ACC
-  Wire.write(address); // send register address
-  Wire.write(val); // send value to write
-  Wire.endTransmission(); //end transmission
-}
+File logfile;               //The file needed for the recording data
 
-void readFrom(int DEVICE, byte address, int num, byte buff[]){
-  Wire.beginTransmission(DEVICE); //start transmission to ACC
-  Wire.write(address); //sends address to read from
-  Wire.endTransmission(); //end transmission
-  Wire.beginTransmission(DEVICE); //start transmission to ACC
-  Wire.requestFrom(DEVICE, num); // request 6 bytes from ACC
-  int i = 0;
-  while(Wire.available()){ //ACC may send less than requested (abnormal)
-    buff[i] = Wire.read(); // receive a byte
-    i++;
-  }
-  Wire.endTransmission(); 
-}
+Adafruit_MMA8451 mma = Adafruit_MMA8451(); //Creating the Adafruit_MMA8451 object
 
-void setup(){
+MS5xxx sensor(&Wire);  //Creating the MS5xxx sensor object       
+
+void setup() {
   Serial.begin(9600);
 
-  pinMode(vib_pin,INPUT);
-  
-  Wire.begin();
-  initAcc();
-
-  Serial.print("Initializing SD card...");
-  if (!SD.begin(chipSelect)) {
-    Serial.println("card failed, or not present.");
-    return;
+  //Checking if the SD Card is initialized
+  if(!SD.begin(cardSelect)){              
+    Serial.println("Card init. failed"); 
   }
-  Serial.println("card initialized.");
+
+  //Checking if the altimeter is connected correctly
+  if(sensor.connect()>0){
+    Serial.println("Error connecting to the altimeter");
+    delay(500);
+    setup();
+    } 
+  
+  //Checking if the altimeter is connected correctly
+  if(! mma.begin()){
+    Serial.println("Error connecting to the acclerometer");
+    while(1);
+  }
+
+  mma.setRange(MMA8451_RANGE_2_G); //Setting the range for the acclerometer
+  
+  Serial.print("Range = "); Serial.print(2 << mma.getRange());  
+  Serial.println("G");
 }
 
-void loop(){
+void loop() {
 
-  int val = digitalRead(vib_pin);           //vibration sensor
+  //Measuring time in milliseconds
+  unsigned long time = millis();
+  Serial.print("Time: "); Serial.println(time);
+
+  //Measuring vibration
+  int vibSensor = analogRead(vib_pin);
+  Serial.print("Vibration [Hz]: "); Serial.println(vibSensor);
   
-  int reading = analogRead(sensorPin);  //temperature sensor
-  float voltage = reading * 5.0;
-  voltage /= 1024.0;
+  delay(100);
 
-  Serial.print(voltage); Serial.println(" volts");
+  //Reading from the accelerometer 
+  mma.read();
+ 
+  Serial.print("X:\t"); Serial.print(mma.x); 
+  Serial.print("\tY:\t"); Serial.print(mma.y); 
+  Serial.print("\tZ:\t"); Serial.print(mma.z); 
+  Serial.println();
 
-  float temperatureC = (voltage - 0.5) * 100;
-  Serial.print(temperatureC); Serial.println( "degrees C");
+  //Getting a new sensor event 
+  sensors_event_t event; 
+  mma.getEvent(&event);
+
+  //Measuring acceleration in ms^-2 for x,y and z axes
+  Serial.print("X: \t"); Serial.print(event.acceleration.x); Serial.print("\t");
+  Serial.print("Y: \t"); Serial.print(event.acceleration.y); Serial.print("\t");
+  Serial.print("Z: \t"); Serial.print(event.acceleration.z); Serial.print("\t");
+  Serial.println("m/s^2 ");
+
+  //Calculating acceleration in 1 dimension using pythagorean theorem
+  float acc_1d = sqrt(pow(event.acceleration.x, 2) + pow(event.acceleration.y, 2) + pow(event.acceleration.z, 2));
+  Serial.println("Acceleration in 1D: "); Serial.print(acc_1d); Serial.println("m/s^2 ");
   
-  int x,y,z;                  //accelerometer
-  int acc[3];
+  //Getting the orientation of the sensor
+  uint8_t o = mma.getOrientation();
+  
+  switch (o) {
+    case MMA8451_PL_PUF: 
+      Serial.println("Portrait Up Front");
+      break;
+    case MMA8451_PL_PUB: 
+      Serial.println("Portrait Up Back");
+      break;    
+    case MMA8451_PL_PDF: 
+      Serial.println("Portrait Down Front");
+      break;
+    case MMA8451_PL_PDB: 
+      Serial.println("Portrait Down Back");
+      break;
+    case MMA8451_PL_LRF: 
+      Serial.println("Landscape Right Front");
+      break;
+    case MMA8451_PL_LRB: 
+      Serial.println("Landscape Right Back");
+      break;
+    case MMA8451_PL_LLF: 
+      Serial.println("Landscape Left Front");
+      break;
+    case MMA8451_PL_LLB: 
+      Serial.println("Landscape Left Back");
+      break;
+    }
+  Serial.println("---");
+  delay(500); 
 
-  getAccelerometerData(acc);
-  x = acc[0]; //not sure
-  y = acc[1]; //not sure
-  z = acc[2];
+  float xv = (mma.x/1024.0*ADC_ref-zero_x)/sensitivity_x;
+  float yv = (mma.y/1024.0*ADC_ref-zero_y)/sensitivity_y;
+  float zv = (mma.z/1024.0*ADC_ref-zero_z)/sensitivity_z;
 
-  Serial.print("x = ");
-  Serial.print(x);
+  //Measuring the angle for x
+  float angle_x =atan2(-yv,-zv)*57.2957795+180;
+  Serial.print("Rotation for x: ");
+  Serial.print(angle_x);
+  Serial.print(" deg");
   Serial.print(" ");
 
-  Serial.print("y = ");
-  Serial.print(y);
-  Serial.print(" ");
+  //Measuring the angle for y
+  float angle_y =atan2(-xv,-zv)*57.2957795+180;
+  Serial.print("Rotation for y: ");
+  Serial.print(angle_y);
+  Serial.print(" deg");
+  Serial.print(" "); 
   
-  Serial.print("z = ");
-  Serial.print(z);
-  Serial.print(" ");
+  //Measuring the angle for z
+  float angle_z =atan2(-yv,-xv)*57.2957795+180;
+  Serial.print("Rotation for z: ");
+  Serial.print(angle_z);
+  Serial.print(" deg");
+  Serial.print("\n");
 
-  sine_angle_z = ((z + 10.00 )/240.00);
+  Serial.println("---");
+  delay(500); 
 
-  Serial.print(" sine_angle_z = ");
-  Serial.print(sine_angle_z);
-  Serial.print(" ");
-
-  delay(1000);
+  //Readings from the altimeter
+  sensor.ReadProm();
+  sensor.Readout();
+  Serial.print("Temperature [C]: ");      //Measuring temperature in 0.01 Celcius
+  Serial.println(sensor.GetTemp()*0.01);
+  Serial.print("Pressure [Pa]: ");        //Measuring pressure
+  Serial.println(sensor.GetPres());       
   
-  if (sine_angle_z >1) { 
-    sine_angle_z = 1; 
- }
-  else if (sine_angle_z <-1){ 
-    sine_angle_z = -1; 
- }
-
-  angle_z_degrees = asin(sine_angle_z)* RAD_TO_DEG;
-  Serial.print(" angle_z_degrees = ");
-  Serial.println(angle_z_degrees);
-  delay(250);
+  //Calculating the altitude using hypsometric formula
+  float altitude = ((-1.0 + pow((p_sealevel/(sensor.GetPres()/100)), (1/5.257)))*(((sensor.GetTemp()*0.01)+273.15)/0.0065)); //preassure in hPa
+  Serial.print("Altitude [m]: "); Serial.println(altitude*0.3048); //Converting Ft to m, the calcultion above gives the altitude in Ft
   
-  File dataFile = SD.open("accandangle.csv", FILE_WRITE); 
-  if (dataFile) { 
-    dataFile.println(x);
-    dataFile.println(y);
-    dataFile.println(z);
-    dataFile.println(angle_z_degrees);
-    dataFile.println(temperatureC);
-    dataFile.println(val); 
-    dataFile.close(); 
- }
-  else {
-  Serial.println("Error opening datalog.csv"); 
- }
+  test_crc();
+  Serial.println("---");
+  delay(500);
+
+  //Writing data to SD Card
+  File logfile = SD.open("wr.csv", FILE_WRITE); //Opening a file to write data to
+  if(logfile){  //If data file is open
+    logfile.print("Time: "); logfile.print(","); logfile.println(time);
+    logfile.print("Acceleration in x = "); logfile.print(","); logfile.println(mma.x);
+    logfile.print("Acceleration in y = "); logfile.print(","); logfile.println(mma.y);
+    logfile.print("Acceleration in z = "); logfile.print(","); logfile.println(mma.z);
+    logfile.println("Acceleration in 1D: "); logfile.print(","); logfile.print(acc_1d); logfile.println("m/s^2 ");
+
+    logfile.print("Rotation for x: "); logfile.print(","); logfile.print(angle_x); logfile.println(" deg");
+    logfile.print("Rotation for y: "); logfile.print(","); logfile.print(angle_y); logfile.println(" deg");
+    logfile.print("Rotation for z: "); logfile.print(","); logfile.print(angle_z); logfile.println(" deg");
+  
+    
+    logfile.print("TemperatureA [C]: "); logfile.print(","); logfile.println(sensor.GetTemp()*0.01);
+    logfile.print("Pressure [Pa]: "); logfile.print(","); logfile.println(sensor.GetPres());
+    logfile.print("Altitude [m]: "); logfile.print(","); logfile.println(altitude*0.3048);
+
+    logfile.print("Vibration [Hz]: "); logfile.print(","); logfile.println(vibSensor);
+    logfile.close();
+}
+}
+
+//Testing the readings for altimeter
+void test_crc() {
+  sensor.ReadProm();
+  sensor.Readout(); 
+  Serial.print("CRC=0x");
+  Serial.print(sensor.Calc_CRC4(), HEX);
+  Serial.print(" (should be 0x");
+  Serial.print(sensor.Read_CRC4(), HEX);
+  Serial.print(")\n");
+  Serial.print("Test Code CRC=0x");
+  Serial.print(sensor.CRCcodeTest(), HEX);
+  Serial.println(" (should be 0xB)");
 }
