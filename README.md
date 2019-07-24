@@ -17,5 +17,9 @@ The aim of this project is to measure the instantaneous values for altitude, acc
 
 All the detailed information regarding code is explained with comments on the code.
 
+The libraries used in this project are given below. The following libraries should be uploaded to the Arduino Software.
 
-**don't forget to add the libraries**
+- For the altimeter: https://www.arduinolibraries.info/libraries/ms5xxx
+
+- For the accelerometer:
+https://www.arduinolibraries.info/libraries/adafruit-mma8451-library
